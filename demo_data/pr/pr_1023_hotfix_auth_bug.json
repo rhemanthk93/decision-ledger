@@ -1,0 +1,75 @@
+{
+  "action": "closed",
+  "number": 1023,
+  "pull_request": {
+    "url": "https://api.github.com/repos/meridian-labs/platform/pulls/1023",
+    "id": 1923847502,
+    "node_id": "PR_kwDOMeridianLabs1023",
+    "html_url": "https://github.com/meridian-labs/platform/pull/1023",
+    "number": 1023,
+    "state": "closed",
+    "locked": false,
+    "title": "[hotfix][P1] Fix JWT validation regression in /auth/refresh",
+    "user": {
+      "login": "rshah",
+      "id": 31847,
+      "type": "User"
+    },
+    "body": "## What\n\nJWT validation on `/auth/refresh` is rejecting valid tokens signed before 2026-06-22 because the signing-key rotation landed in main at 18:03 SGT today but the refresh handler still expects the new `kid` header exclusively. This PR restores the fallback-to-previous-key lookup that was accidentally dropped in #1019.\n\n## Why hotfix\n\nP1 — every customer SDK token issued in the last 48h fails to refresh. Customers are getting logged out of their dashboards. We're seeing a 3x spike in `/auth/login` traffic as a proxy. Triaged by on-call at 21:40 SGT.\n\n## Scope\n\n- `services/auth/handlers/refresh.py` — restore the two-`kid` fallback path\n- `tests/auth/test_refresh.py` — add a regression test for the old-`kid` case\n\nNo other files touched. Revert is a one-line flag flip if this causes any secondary issue.\n\n## Testing\n\n- New regression test passes locally and in CI\n- Manual smoke: refreshed a token issued 2026-06-21 against this branch, works\n- Staging deploy pending post-merge verification\n\n## Review\n\nMerged with 1 approval per the hotfix policy update (see #backend-guild thread from 2026-05-12). Tagged P1 as per that policy. @jwong approved.",
+    "created_at": "2026-06-24T13:48:11Z",
+    "updated_at": "2026-06-24T14:15:00Z",
+    "closed_at": "2026-06-24T14:15:00Z",
+    "merged_at": "2026-06-24T14:15:00Z",
+    "merged": true,
+    "merge_commit_sha": "c91f7d32a8e641b5c2d9e0f4a8b7d3e2f5c61a9e",
+    "draft": false,
+    "head": {
+      "ref": "rshah/hotfix-jwt-refresh-kid-fallback",
+      "sha": "e4a9c17b5d2f0c38a6e2b9d1f7c5a3e8b4d2c0f6"
+    },
+    "base": {
+      "ref": "main",
+      "sha": "b2d8f47a3e19c05d6f4a2c8b9e7d3a1c5f8b4e29"
+    },
+    "labels": [
+      {"name": "hotfix", "color": "b60205"},
+      {"name": "P1", "color": "e11d21"},
+      {"name": "auth", "color": "0e8a16"},
+      {"name": "size/XS", "color": "c2e0c6"}
+    ],
+    "assignees": [
+      {"login": "rshah"}
+    ],
+    "requested_reviewers": [
+      {"login": "jwong"}
+    ],
+    "milestone": null,
+    "changed_files": 2,
+    "additions": 18,
+    "deletions": 4,
+    "commits": 2,
+    "review_comments": 1,
+    "comments": 3,
+    "merged_by": {
+      "login": "rshah"
+    },
+    "requested_teams": []
+  },
+  "reviews": [
+    {
+      "user": {"login": "jwong"},
+      "state": "APPROVED",
+      "submitted_at": "2026-06-24T14:09:33Z",
+      "body": "Verified the test fails on old main and passes with your change. LGTM, ship it."
+    }
+  ],
+  "repository": {
+    "full_name": "meridian-labs/platform",
+    "default_branch": "main",
+    "private": true
+  },
+  "sender": {
+    "login": "rshah",
+    "type": "User"
+  }
+}
