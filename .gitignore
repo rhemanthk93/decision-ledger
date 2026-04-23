@@ -1,2 +1,12 @@
-.claude/
+# Claude Code — share team settings, ignore local/user state
+.claude/*
+!.claude/settings.json
+!.claude/commands/
+!.claude/agents/
+!.claude/skills/
+
+# JetBrains IDEs
+.idea/
+
+# macOS
 .DS_Store
