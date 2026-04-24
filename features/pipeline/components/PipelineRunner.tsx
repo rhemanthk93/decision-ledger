@@ -6,8 +6,7 @@ import {
   Database, Cpu, GitMerge, Shield, MessageSquare, HardDrive, Folder,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { detectConflicts, applyConflictStatuses } from '@/features/ledger/lib/conflict-detection'
-import type { Decision, Conflict, DLDocument, DecisionStatus } from '@/lib/types'
+import { BACKEND_BASE_URL } from '@/lib/supabase'
 
 type StageStatus = 'idle' | 'running' | 'done' | 'error'
 
@@ -29,12 +28,12 @@ interface AgentMeta {
 }
 
 const AGENTS: AgentMeta[] = [
-  { id: 'fetch',   name: 'Ingestor',  model: 'File System · demo_data/',   icon: Database,      iconCls: 'text-amber-500',   layer: 'bronze',  parallel: false },
-  { id: 'extract', name: 'Extractor', model: 'Claude Haiku 4.5',           icon: Cpu,           iconCls: 'text-blue-500',    layer: 'silver',  parallel: true  },
-  { id: 'cluster', name: 'Resolver',  model: 'topic_cluster · TypeScript', icon: GitMerge,      iconCls: 'text-violet-500',  layer: 'silver',  parallel: false },
-  { id: 'detect',  name: 'Detector',  model: 'Conflict Detection · TS',    icon: Shield,        iconCls: 'text-rose-500',    layer: 'gold',    parallel: false },
-  { id: 'narrate', name: 'Narrator',  model: 'Claude Sonnet 4.6',          icon: MessageSquare, iconCls: 'text-emerald-500', layer: 'gold',    parallel: true  },
-  { id: 'store',   name: 'Writer',    model: 'localStorage',               icon: HardDrive,     iconCls: 'text-slate-400',   layer: 'storage', parallel: false },
+  { id: 'fetch',   name: 'Ingestor',  model: 'POST /ingest · SHA256 dedupe',        icon: Database,      iconCls: 'text-amber-500',   layer: 'bronze',  parallel: false },
+  { id: 'extract', name: 'Extractor', model: 'Claude Haiku 4.5 · tool-use',         icon: Cpu,           iconCls: 'text-blue-500',    layer: 'silver',  parallel: true  },
+  { id: 'cluster', name: 'Resolver',  model: 'Gemini embedding-001 · 768-dim cosine', icon: GitMerge,    iconCls: 'text-violet-500',  layer: 'silver',  parallel: false },
+  { id: 'detect',  name: 'Detector',  model: 'Python rule engine · 5 rules',        icon: Shield,        iconCls: 'text-rose-500',    layer: 'gold',    parallel: false },
+  { id: 'narrate', name: 'Narrator',  model: 'Claude Sonnet 4.6 · teammate voice',  icon: MessageSquare, iconCls: 'text-emerald-500', layer: 'gold',    parallel: true  },
+  { id: 'store',   name: 'Writer',    model: 'Supabase · Postgres + pgvector',      icon: HardDrive,     iconCls: 'text-slate-400',   layer: 'storage', parallel: false },
 ]
 
 const LAYER_BADGE: Record<AgentMeta['layer'], string> = {
@@ -76,100 +75,112 @@ export default function PipelineRunner({ onComplete }: PipelineRunnerProps) {
     setStages(INITIAL_STAGES)
 
     try {
-      patch('fetch', { status: 'running', detail: 'Scanning demo_data/ folders...' })
+      // Stage 1-2: snapshot current state (Ingestor + Extractor have already
+      // run via /ingest + the extractor consumer pool; their output is what's
+      // already in Supabase).
+      patch('fetch', { status: 'running', detail: 'Reading Supabase state...' })
+      const statusRes = await fetch(`${BACKEND_BASE_URL}/admin/status`)
+      if (!statusRes.ok) {
+        throw new Error(
+          `Backend not reachable at ${BACKEND_BASE_URL}. ` +
+            `Start it with: cd backend && uv run uvicorn app.main:app --port 8000`
+        )
+      }
+      const before = (await statusRes.json()) as {
+        documents: number
+        decisions: number
+        topic_clusters: number
+        conflicts: number
+        unclustered_decisions: number
+        unnarrated_conflicts: number
+      }
 
-      const filesRes = await fetch('/api/demo-files')
-      if (!filesRes.ok) throw new Error(`demo-files: ${filesRes.statusText}`)
-      const { documents: rawDocs, count, folders } = await filesRes.json()
-
-      const dlDocs: DLDocument[] = rawDocs.map((d: {
-        id: string; name: string; doc_type: DLDocument['doc_type']; content: string; uploaded_at: string
-      }) => ({
-        id: d.id, name: d.name, doc_type: d.doc_type,
-        content: d.content, uploaded_at: d.uploaded_at, status: 'done' as const,
-      }))
-      localStorage.setItem('dl_documents', JSON.stringify(dlDocs))
-      patch('fetch', { status: 'done', detail: `${count} documents ingested`, folders })
-
-      patch('extract', { status: 'running', detail: `Sending ${count} docs in parallel...` })
-      const extractRes = await fetch('/api/pipeline/extract-batch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ documents: rawDocs }),
+      patch('fetch', {
+        status: 'done',
+        detail: `${before.documents} documents in documents table (content-hash deduped)`,
       })
-      if (!extractRes.ok) throw new Error(`extract-batch: ${extractRes.statusText}`)
-      const { results: extractResults, errors: extractErrors, total_decisions } = await extractRes.json()
-
-      const allDecisions: Decision[] = extractResults.flatMap(
-        (r: { decisions: Decision[] }) => r.decisions
-      )
-      const errCount = extractErrors?.length ?? 0
       patch('extract', {
         status: 'done',
-        detail: `${total_decisions} decisions extracted${errCount ? ` (${errCount} errors)` : ''}`,
+        detail:
+          `${before.decisions} decisions in decisions table` +
+          (before.unclustered_decisions > 0
+            ? ` (${before.unclustered_decisions} pending clustering)`
+            : ''),
       })
 
-      patch('cluster', { status: 'running', detail: 'Grouping by topic cluster...' })
-      const clusters = Array.from(new Set(allDecisions.map(d => d.topic_cluster)))
+      // Stages 3-5: resolve → detect → narrate happen synchronously inside
+      // POST /admin/run-pipeline. Mark all three as running so the user sees
+      // they're in-flight; we'll split the result fields back out when it
+      // responds.
+      patch('cluster', { status: 'running', detail: 'Embedding unclustered decisions via Gemini + greedy cosine...' })
+      patch('detect', { status: 'running', detail: 'Waiting for resolver...' })
+      patch('narrate', { status: 'running', detail: 'Waiting for detector...' })
+
+      const runRes = await fetch(`${BACKEND_BASE_URL}/admin/run-pipeline`, {
+        method: 'POST',
+      })
+      if (!runRes.ok) {
+        const body = await runRes.text()
+        throw new Error(`run-pipeline ${runRes.status}: ${body || runRes.statusText}`)
+      }
+      const run = (await runRes.json()) as {
+        ok: boolean
+        elapsed_ms: number
+        resolver: {
+          n_embedded: number
+          n_new_clusters: number
+          n_assigned_to_existing: number
+          total_clusters: number
+        }
+        detector: {
+          clusters_walked: number
+          firings: number
+          new_conflicts: number
+        }
+        narrator: { narrated: number; failed: number; pending_before: number }
+        state_after: typeof before
+      }
+
+      const r = run.resolver
+      const d = run.detector
+      const n = run.narrator
+      const after = run.state_after
+
       patch('cluster', {
         status: 'done',
-        detail: `${clusters.length} clusters — ${clusters.slice(0, 3).join(', ')}${clusters.length > 3 ? '…' : ''}`,
+        detail:
+          `${after.topic_clusters} clusters` +
+          (r.n_embedded > 0
+            ? ` (${r.n_embedded} newly embedded, ${r.n_new_clusters} new)`
+            : ` (no new embeddings this run)`),
       })
-
-      patch('detect', { status: 'running', detail: 'Walking decision pairs...' })
-      const baseDecisions: Decision[] = allDecisions.map(d => ({ ...d, status: 'active' as DecisionStatus }))
-      const rawConflicts: Conflict[]   = detectConflicts(baseDecisions)
-      const decisionsWithStatus        = applyConflictStatuses(baseDecisions, rawConflicts)
       patch('detect', {
         status: 'done',
-        detail: `${rawConflicts.length} conflicts across ${clusters.length} clusters`,
+        detail:
+          `${d.firings} pair firings across ${d.clusters_walked} clusters` +
+          (d.new_conflicts > 0 ? ` · ${d.new_conflicts} new this run` : ` · all idempotent`),
+      })
+      patch('narrate', {
+        status: 'done',
+        detail:
+          n.narrated > 0
+            ? `${n.narrated} new narration${n.narrated === 1 ? '' : 's'}` +
+              (n.failed > 0 ? ` (${n.failed} failed)` : '')
+            : `${after.conflicts - after.unnarrated_conflicts}/${after.conflicts} already narrated`,
       })
 
-      patch('narrate', { status: 'running', detail: `Sending ${rawConflicts.length} conflicts in parallel...` })
-      const decisionsMap = new Map(decisionsWithStatus.map(d => [d.id, d]))
-      const narrateItems = rawConflicts
-        .map(c => ({
-          conflict: c,
-          earlier:  decisionsMap.get(c.earlier_decision_id),
-          later:    decisionsMap.get(c.later_decision_id),
-        }))
-        .filter((item): item is { conflict: Conflict; earlier: Decision; later: Decision } =>
-          !!item.earlier && !!item.later
-        )
-
-      let narratedConflicts: Conflict[] = [...rawConflicts]
-      if (narrateItems.length > 0) {
-        const narrateRes = await fetch('/api/pipeline/narrate-batch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ items: narrateItems }),
-        })
-        if (!narrateRes.ok) throw new Error(`narrate-batch: ${narrateRes.statusText}`)
-        const { narrations } = await narrateRes.json()
-        const narrationMap = new Map<string, string>(
-          narrations.map((n: { conflict_id: string; narration: string }) => [n.conflict_id, n.narration])
-        )
-        narratedConflicts = rawConflicts.map(c => ({
-          ...c,
-          narration: narrationMap.get(c.id),
-        }))
-      }
-      patch('narrate', { status: 'done', detail: `${narrateItems.length} conflicts narrated` })
-
-      patch('store', { status: 'running', detail: 'Writing to localStorage...' })
-      localStorage.setItem('dl_decisions', JSON.stringify(decisionsWithStatus))
-      localStorage.setItem('dl_conflicts', JSON.stringify(narratedConflicts))
+      patch('store', { status: 'running', detail: 'Reading final Supabase state...' })
       patch('store', {
         status: 'done',
-        detail: `${decisionsWithStatus.length} decisions · ${narratedConflicts.length} conflicts persisted`,
+        detail: `${after.decisions} decisions · ${after.conflicts} conflicts · ${after.topic_clusters} clusters`,
       })
 
       setResult({
-        docs:      count,
-        decisions: decisionsWithStatus.length,
-        clusters:  clusters.length,
-        conflicts: rawConflicts.length,
-        narrated:  narrateItems.length,
+        docs: after.documents,
+        decisions: after.decisions,
+        clusters: after.topic_clusters,
+        conflicts: after.conflicts,
+        narrated: n.narrated,
       })
       onComplete()
     } catch (err) {
