@@ -2,7 +2,9 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+# override=True so .env wins over empty shell exports (e.g. some harnesses
+# inject ANTHROPIC_API_KEY="" which silently shadows the real key).
+load_dotenv(override=True)
 
 # ---- LLM models (hardcoded) ----
 HAIKU_MODEL = "claude-haiku-4-5-20251001"

@@ -24,6 +24,10 @@ dev = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "integration: live tests that hit the real Haiku + Supabase APIs (slower, cost tokens).",
+]
 
 [tool.uv]
 package = false
