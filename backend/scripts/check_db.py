@@ -7,8 +7,11 @@ from __future__ import annotations
 
 import logging
 import sys
+from pathlib import Path
 
-from app.db import get_supabase
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from app.db import get_supabase  # noqa: E402
 
 TABLES = ("documents", "topic_clusters", "decisions", "conflicts")
 
