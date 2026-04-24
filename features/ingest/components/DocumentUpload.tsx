@@ -8,8 +8,10 @@ import { Textarea } from '@/components/ui/textarea'
 import { nanoid } from '@/lib/utils'
 import type { DocType, DLDocument, Decision, DecisionType } from '@/lib/types'
 import { saveDocument } from '../lib/storage'
-import { saveDecisions, saveConflicts, getDecisions } from '@/features/ledger/lib/storage'
-import { detectConflicts, applyConflictStatuses } from '@/features/ledger/lib/conflict-detection'
+import { saveDecisions, getDecisions } from '@/features/ledger/lib/storage'
+// conflict-detection is now the backend's job (agents/detector.py); the
+// client-side helpers that used to live at features/ledger/lib/conflict-detection
+// are no longer called from this component.
 import ExtractionStream from './ExtractionStream'
 
 const DOC_TYPES: { value: DocType; label: string }[] = [
@@ -110,14 +112,13 @@ export default function DocumentUpload({ onSuccess }: Props) {
       saveDecisions(decisions)
       setExtractedDecisions(decisions)
 
-      // Run conflict detection on all decisions
-      const allDecisions = getDecisions()
-      const conflicts = detectConflicts(allDecisions)
-      const updated = applyConflictStatuses(allDecisions, conflicts)
-
-      saveDecisions(updated)
-      saveConflicts(conflicts)
-      setConflictCount(conflicts.length)
+      // Conflict detection now runs in the Python backend's detector
+      // agent. The numbers we display here are just what this one
+      // upload contributed; the full ledger refreshes via Supabase
+      // Realtime + the Refresh button on LedgerContent.
+      const allDecisions = await getDecisions()
+      setConflictCount(0)
+      void allDecisions
 
       doc.status = 'done'
       saveDocument(doc)

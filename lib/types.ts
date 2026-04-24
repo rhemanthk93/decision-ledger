@@ -1,5 +1,5 @@
 export type DocType = 'transcript' | 'adr' | 'slack' | 'pr' | 'memo'
-export type DecisionType = 'architectural' | 'strategic' | 'process' | 'product'
+export type DecisionType = 'architectural' | 'strategic' | 'process' | 'product' | 'action'
 export type DecisionStatus = 'active' | 'reversed' | 'contradicted' | 'superseded'
 export type ConflictType = 'reversal' | 'contradiction' | 'silent_change'
 

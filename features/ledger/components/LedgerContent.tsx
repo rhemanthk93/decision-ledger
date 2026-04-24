@@ -25,10 +25,10 @@ import {
   updateConflictNarration,
   clearAll,
 } from '../lib/storage'
-import { detectConflicts, applyConflictStatuses } from '../lib/conflict-detection'
 import { formatDate, statusLabel, docTypeLabel, conflictTypeLabel } from '../lib/formatters'
 import { getDocuments } from '@/features/ingest/lib/storage'
-import { seedDemoData, LIVE_DEMO_DOCUMENT } from '@/lib/demo-data'
+import { LIVE_DEMO_DOCUMENT } from '@/lib/demo-data'
+import { BACKEND_BASE_URL } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
 
 const TOPIC_COLORS = [
@@ -87,46 +87,63 @@ export default function LedgerContent() {
   const highlightRef = useRef<HTMLDivElement | null>(null)
   const deferredFilterText = useDeferredValue(filterText)
 
-  const load = useCallback(() => {
-    let decs = getDecisions()
-    const storedConflicts = getConflicts()
-    const docs = getDocuments()
+  // Supabase-backed load. The backend is the source of truth:
+  // decisions are already clustered, conflicts already narrated, and
+  // decision.status is computed by the adapter from conflict rows.
+  const load = useCallback(async () => {
+    const [decs, storedConflicts, docs] = await Promise.all([
+      getDecisions(),
+      getConflicts(),
+      getDocuments(),
+    ])
     setDocuments(docs)
-
-    if (decs.length === 0) {
-      seedDemoData()
-      decs = getDecisions()
-      setSeeded(true)
-    }
-
-    if (decs.length > 0) {
-      const storedByPair = new Map(
-        storedConflicts.map(c => [
-          `${c.earlier_decision_id}::${c.later_decision_id}`,
-          c,
-        ])
-      )
-      const freshConflicts = detectConflicts(decs)
-      const conflictsWithData = freshConflicts.map(c => {
-        const stored = storedByPair.get(`${c.earlier_decision_id}::${c.later_decision_id}`)
-        return stored ? { ...c, narration: stored.narration, resolved: stored.resolved } : c
-      })
-      const activeConflicts = conflictsWithData.filter(c => !c.resolved)
-      const resetDecs = decs.map(d => ({ ...d, status: 'active' as DecisionStatus }))
-      const updated = applyConflictStatuses(resetDecs, activeConflicts)
-      setDecisions(updated)
-      setConflicts(conflictsWithData)
-      saveDecisions(updated)
-      saveConflicts(conflictsWithData)
-    } else {
-      setDecisions(decs)
-      setConflicts(storedConflicts)
-    }
+    setDecisions(decs)
+    setConflicts(storedConflicts)
+    setSeeded(decs.length > 0)
   }, [])
 
   useEffect(() => {
-    const frame = requestAnimationFrame(load)
-    return () => cancelAnimationFrame(frame)
+    load()
+  }, [load])
+
+  // Supabase Realtime — auto-refresh when decisions/conflicts/topic_clusters change.
+  useEffect(() => {
+    const { getSupabase } = require('@/lib/supabase')
+    const sb = getSupabase()
+    const channel = sb
+      .channel('ledger-live')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'decisions' }, () => load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'conflicts' }, () => load())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'topic_clusters' }, () => load())
+      .subscribe()
+    return () => {
+      sb.removeChannel(channel)
+    }
+  }, [load])
+
+  // Refresh button: force a synchronous pipeline cycle on the Python
+  // backend (resolve → detect → narrate), then re-read Supabase. The
+  // Realtime subscription above will ALSO fire during the pipeline;
+  // this just guarantees the user sees state after the cycle completes.
+  const [refreshing, setRefreshing] = useState(false)
+  const [lastRun, setLastRun] = useState<Date | null>(null)
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true)
+    try {
+      const res = await fetch(`${BACKEND_BASE_URL}/admin/run-pipeline`, {
+        method: 'POST',
+      })
+      if (!res.ok) {
+        console.error('run-pipeline failed:', res.status, await res.text())
+      } else {
+        setLastRun(new Date())
+      }
+    } catch (e) {
+      console.error('run-pipeline error:', e)
+    } finally {
+      await load()
+      setRefreshing(false)
+    }
   }, [load])
 
   // Scroll highlighted card into view
@@ -270,22 +287,15 @@ export default function LedgerContent() {
     }
   }
   const handleResolveConflict = (conflictId: string) => {
-    setConflicts(prev => {
-      const next = prev.map(c => c.id === conflictId ? { ...c, resolved: true } : c)
-      saveConflicts(next)
-      const active = next.filter(c => !c.resolved)
-      const resetDecs = decisions.map(d => ({ ...d, status: 'active' as DecisionStatus }))
-      const updatedDecs = applyConflictStatuses(resetDecs, active)
-      setDecisions(updatedDecs)
-      saveDecisions(updatedDecs)
-      return next
-    })
+    // Local-only "mark resolved" for UX — backend is the source of truth
+    // and conflict rows stay in place. A future backend endpoint could
+    // toggle conflicts.resolved if we want this to persist across sessions.
+    setConflicts(prev => prev.map(c => c.id === conflictId ? { ...c, resolved: true } : c))
   }
 
   const handleResetDemo = () => {
-    clearAll()
-    seedDemoData()
-    setSeeded(true)
+    // clearAll() is now a client-side no-op (Supabase is source of truth).
+    // "Reset demo" reduces to re-reading from the backend.
     load()
   }
 
@@ -612,13 +622,29 @@ export default function LedgerContent() {
             <p className="text-sm text-muted-foreground mt-1">All extracted decisions by topic & time</p>
           </div>
           <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+              title="Run the backend pipeline (resolve → detect → narrate) against Supabase, then re-read."
+            >
+              {refreshing
+                ? <Loader2 className="h-3 w-3 animate-spin" />
+                : <RotateCcw className="h-3 w-3" />}
+              {refreshing ? 'Running pipeline…' : 'Refresh pipeline'}
+              {lastRun && !refreshing && (
+                <span className="text-muted-foreground ml-1">
+                  (last {lastRun.toLocaleTimeString()})
+                </span>
+              )}
+            </button>
             {seeded && (
               <button
                 onClick={handleResetDemo}
                 className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               >
                 <RotateCcw className="h-3 w-3" />
-                Reset demo
+                Re-read
               </button>
             )}
             {decisions.length > 0 && (
