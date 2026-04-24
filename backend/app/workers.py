@@ -17,8 +17,9 @@ from typing import Any
 
 from app.agents.detector import detect_all
 from app.agents.extractor import extract
+from app.agents.narrator import narrate
 from app.agents.resolver import resolve
-from app.config import EXTRACTOR_WORKERS, RESOLVER_INTERVAL_SEC
+from app.config import EXTRACTOR_WORKERS, NARRATOR_POLL_SEC, RESOLVER_INTERVAL_SEC
 from app.db import get_supabase
 from app.queue import raw_docs
 from app.schemas import Decision, Document
@@ -27,6 +28,7 @@ log = logging.getLogger(__name__)
 
 _worker_tasks: list[asyncio.Task[None]] = []
 _resolver_task: asyncio.Task[None] | None = None
+_narrator_task: asyncio.Task[None] | None = None
 
 
 # ============================================================
@@ -159,11 +161,153 @@ async def run_resolver_interval() -> None:
 
 
 # ============================================================
+# Narrator polling worker
+# ============================================================
+
+async def _fetch_pending_conflicts() -> list[dict[str, Any]]:
+    sb = get_supabase()
+    res = await asyncio.to_thread(
+        lambda: sb.table("conflicts")
+        .select("*")
+        .is_("narration", None)
+        .order("created_at", desc=False)
+        .execute()
+    )
+    return res.data or []
+
+
+async def _fetch_decision_for_narrator(decision_id: str) -> dict[str, Any] | None:
+    sb = get_supabase()
+    res = await asyncio.to_thread(
+        lambda: sb.table("decisions")
+        .select("id, statement, type, decided_at, decided_by, source_excerpt, topic_keywords, confidence, documents(filename)")
+        .eq("id", decision_id)
+        .limit(1)
+        .execute()
+    )
+    return res.data[0] if res.data else None
+
+
+async def _fetch_cluster_history_for_narrator(cluster_id: str) -> list[dict[str, Any]]:
+    sb = get_supabase()
+    res = await asyncio.to_thread(
+        lambda: sb.table("decisions")
+        .select("id, statement, type, decided_at, decided_by, confidence, documents(filename)")
+        .eq("topic_cluster_id", cluster_id)
+        .order("decided_at", desc=False)
+        .order("id", desc=False)
+        .execute()
+    )
+    rows = res.data or []
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        docs = r.get("documents") or {}
+        filename = docs.get("filename") if isinstance(docs, dict) else ""
+        entry: dict[str, Any] = {
+            "date": str(r.get("decided_at") or "")[:10],
+            "statement": r.get("statement"),
+            "type": r.get("type"),
+            "decided_by": r.get("decided_by") or [],
+            "source_filename": filename,
+        }
+        conf = r.get("confidence")
+        if conf is not None and conf < 0.60:
+            entry["confidence"] = round(float(conf), 2)
+        out.append(entry)
+    return out
+
+
+def _decision_payload_for_narrator(row: dict[str, Any]) -> dict[str, Any]:
+    docs = row.get("documents") or {}
+    filename = docs.get("filename") if isinstance(docs, dict) else ""
+    return {
+        "statement": row.get("statement"),
+        "type": row.get("type"),
+        "decided_at": str(row.get("decided_at") or "")[:10],
+        "decided_by": row.get("decided_by") or [],
+        "source_excerpt": row.get("source_excerpt", ""),
+        "source_filename": filename,
+        "confidence": row.get("confidence"),
+    }
+
+
+async def _process_one_conflict(conflict: dict[str, Any]) -> bool:
+    """Returns True if the conflict was narrated (including label written)."""
+    cid = conflict["id"]
+    cluster_id = conflict["cluster_id"]
+    rule = conflict["rule"]
+
+    d1_row = await _fetch_decision_for_narrator(conflict["d1_id"])
+    d2_row = await _fetch_decision_for_narrator(conflict["d2_id"])
+    if d1_row is None or d2_row is None:
+        log.error("narrator poll: conflict %s references missing decision(s)", cid)
+        return False
+
+    cluster_history = await _fetch_cluster_history_for_narrator(cluster_id)
+    result = await narrate(
+        rule,
+        _decision_payload_for_narrator(d1_row),
+        _decision_payload_for_narrator(d2_row),
+        cluster_history,
+    )
+    if result is None:
+        log.error("narrator poll: narrate() returned None for conflict %s", cid)
+        return False
+
+    narration = result["narration"]
+    cluster_label = result.get("cluster_label", "")
+
+    sb = get_supabase()
+    await asyncio.to_thread(
+        lambda: sb.table("conflicts").update({"narration": narration}).eq("id", cid).execute()
+    )
+
+    if cluster_label:
+        existing = await asyncio.to_thread(
+            lambda: sb.table("topic_clusters").select("canonical_label").eq("id", cluster_id).limit(1).execute()
+        )
+        current = (existing.data or [{}])[0].get("canonical_label")
+        if current is None:
+            await asyncio.to_thread(
+                lambda: sb.table("topic_clusters").update({"canonical_label": cluster_label}).eq("id", cluster_id).execute()
+            )
+            log.info("narrator poll: wrote cluster_label=%r for cluster %s", cluster_label, cluster_id)
+
+    log.info("narrator poll: narrated conflict %s (rule=%s)", cid, rule)
+    return True
+
+
+async def run_narrator_poll() -> None:
+    """Polls conflicts WHERE narration IS NULL every NARRATOR_POLL_SEC.
+    One failed iteration must not kill the loop."""
+    log.info("narrator poll worker started (every %ds)", NARRATOR_POLL_SEC)
+    try:
+        while True:
+            try:
+                pending = await _fetch_pending_conflicts()
+                for c in pending:
+                    try:
+                        await _process_one_conflict(c)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as e:  # noqa: BLE001
+                        log.exception("narrator poll: failed on conflict %s: %s", c.get("id"), e)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # noqa: BLE001
+                log.exception("narrator poll cycle failed: %s", e)
+            await asyncio.sleep(NARRATOR_POLL_SEC)
+    except asyncio.CancelledError:
+        log.info("narrator poll worker cancelled")
+        raise
+
+
+# ============================================================
 # Lifecycle (called from FastAPI lifespan)
 # ============================================================
 
 def start_workers() -> None:
-    global _worker_tasks, _resolver_task
+    global _worker_tasks, _resolver_task, _narrator_task
     loop = asyncio.get_event_loop()
     if not _worker_tasks:
         _worker_tasks = [
@@ -179,14 +323,21 @@ def start_workers() -> None:
     else:
         log.warning("resolver interval worker already running")
 
+    if _narrator_task is None:
+        _narrator_task = loop.create_task(run_narrator_poll(), name="narrator-poll")
+    else:
+        log.warning("narrator poll worker already running")
+
 
 async def stop_workers() -> None:
-    global _worker_tasks, _resolver_task
+    global _worker_tasks, _resolver_task, _narrator_task
     tasks: list[asyncio.Task[None]] = []
     if _worker_tasks:
         tasks.extend(_worker_tasks)
     if _resolver_task is not None:
         tasks.append(_resolver_task)
+    if _narrator_task is not None:
+        tasks.append(_narrator_task)
     if not tasks:
         return
     for t in tasks:
@@ -194,4 +345,5 @@ async def stop_workers() -> None:
     await asyncio.gather(*tasks, return_exceptions=True)
     _worker_tasks = []
     _resolver_task = None
+    _narrator_task = None
     log.info("stopped all workers")
