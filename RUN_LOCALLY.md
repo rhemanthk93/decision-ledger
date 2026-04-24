@@ -75,6 +75,17 @@ pnpm dev
 # -> Ready in ~4s, http://localhost:3000
 ```
 
+> **If `/api/query` (Ask Claude) returns empty responses**, your shell may be
+> pre-exporting `ANTHROPIC_API_KEY=""` (Claude Code's harness and some CI
+> shells do this). Next.js's dotenv loader respects the existing environment,
+> so an empty shell var shadows `.env.local`. Use the helper:
+>
+> ```bash
+> ./scripts/start-frontend.sh
+> ```
+>
+> It unsets the poisoned vars first, then execs `pnpm dev`.
+
 Open http://localhost:3000/ledger in your browser.
 
 ## What you'll see
