@@ -21,7 +21,9 @@ cp .env.example .env
 
 ## Apply the migration
 
-The single migration at `db/migrations/001_initial.sql` creates the 4 tables, the pgvector extension, the IVFFlat index, and the Realtime publication. Apply it **once** per Supabase project:
+The migration at `db/migrations/001_initial.sql` creates the 4 tables, the pgvector extension, the IVFFlat index, and the Realtime publication. For a **fresh** Supabase project, apply it once:
+
+> If the project already has a schema from an earlier draft (tables named `topics`, text-typed ids, etc.), apply `002_align_with_build_plan.sql` instead — it drops the old tables and rebuilds to §6. Requires the tables to be empty.
 
 1. Open Supabase Studio → your project → **SQL Editor**.
 2. Paste the full contents of `db/migrations/001_initial.sql` and run.
