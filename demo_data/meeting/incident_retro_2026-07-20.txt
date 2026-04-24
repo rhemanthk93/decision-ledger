@@ -1,0 +1,75 @@
+Meridian Labs — Incident Retro: ING-2026-07-15 Event-ingestion Degradation
+Date: 2026-07-20, 14:00–14:55 SGT
+Location: Clarke meeting room + Zoom bridge
+Attendees: Daniel Lim (facilitator), Wei Ming Tan, Arif Rahman (on-call at time of incident), Rahul Shah
+Transcript auto-generated and lightly cleaned.
+
+---
+
+Daniel: Okay, we're recording. Ground rules for the hour — we're blameless, nobody's on trial. Format is timeline first, root cause second, action items last. Arif, you were on-call, want to walk us through?
+
+Arif: Yeah. So — it was 2026-07-15, Tuesday. Short version: we lost somewhere between 30% and 45% of inbound events to the gateway for about 40 minutes, starting 14:22 SGT. No data was lost — the client-side retry path picked everything up on the backend — but customers saw latency on their dashboards, and we got two support tickets filed during the window.
+
+Daniel: What alerted first?
+
+Arif: The Datadog monitor on gateway p99 latency tripped at 14:24, two minutes in. I was heads-down on something else, picked it up at 14:28. First move was to check the Kafka lag dashboard — saw producer-side backpressure, consumer lag was normal.
+
+Daniel: Which told you the problem was upstream of Kafka.
+
+Arif: Right. I started poking at the gateway. Container logs were — honestly, it took me a minute to realize what I was looking at. The `INGEST_GATEWAY_MAX_PAYLOAD_KB` env var had been changed, so payloads over 256kb were being rejected at ingress instead of at 1024kb where we normally cap.
+
+Daniel: And that change came from where?
+
+Arif: From a config PR that landed in main at 14:08 and was pushed straight to prod as part of the auto-deploy. The intent was to drop the cap because we were seeing abuse from one source; the change was correct in spirit but 256kb was too aggressive. The author — not naming, blameless — tested it against our test-data fixtures, which are all under 10kb.
+
+Rahul: So the test suite didn't catch it, which is fair because our fixtures don't exercise the large-payload path.
+
+Arif: Right. I reverted the change at 14:58, gateway recovered by 15:02. Total customer-visible impact was 40 minutes.
+
+Daniel: Let's do root cause. I'll start and people jump in. The proximate cause is a too-aggressive config value. The interesting question is the process. This change went from PR merge to production with no staging soak at any point.
+
+Wei Ming: Why?
+
+Daniel: Because our auto-deploy fires on merge to main for any service in the platform monorepo, and the config is bundled into the service. It's not broken — it's that we've never made an explicit decision that config changes should go through staging first.
+
+Rahul: That's true for anything, really. We've never made the call.
+
+Daniel: Right. So the deep cause is that our deploy policy is implicit. Each PR author decides for themselves whether their change is "safe enough" to auto-deploy, and for most things it is. But there's no guardrail for changes that are risky in shapes our CI can't catch — and config changes with production-facing impact are the single most common example.
+
+Wei Ming: Are you proposing a change?
+
+Daniel: Yes. My recommendation is all production deploys go through staging for a minimum 24-hour soak period. Exceptions are explicit — someone has to click through a "bypass staging" button in the deploy UI and note a reason, which logs to the incident log regardless of whether anything actually breaks. If we want the convenience of auto-deploy for low-risk changes, we can add an allow-list later. The default should be staging first.
+
+Arif: Would this have caught this incident?
+
+Daniel: Yes. We have enough prod-shaped traffic in staging that a 256kb payload rejection would have been obvious in the first hour of soak.
+
+Wei Ming: I support it. Daniel, write it up as an ADR, I'll sign this week.
+
+Daniel: Will do.
+
+Rahul: On the runbook side — the thing that slowed Arif down was not having a playbook for "gateway is dropping large payloads." We've got runbooks for Kafka lag, for database failover, but our runbook coverage on the gateway specifically is thin.
+
+Arif: Yeah, I was flying blind for the first 15 minutes.
+
+Daniel: Proposal — any P0 or P1 incident ticket must have runbook tags linking to the relevant runbooks. If there aren't any, the on-call writes the runbook as part of the post-incident work, within two weeks.
+
+Arif: That's fair. I'll take the gateway runbook as my retro action.
+
+Wei Ming: Agreed. Daniel, same ADR or separate?
+
+Daniel: Separate — this one is process-level, not deploy-level. I'll file both.
+
+Wei Ming: Good.
+
+Daniel: Anything else anyone wants on the record? Process gaps, monitoring gaps, anything that would have made the 40 minutes shorter?
+
+Arif: One thing — I didn't know the auto-deploy pipeline well enough to find the triggering PR quickly. That's on me, but it's also a gap we should close with onboarding documentation for new on-call rotations.
+
+Daniel: Noted. Taking that as a non-decision action item — you and I can pair on docs next week.
+
+Wei Ming: Okay.
+
+Daniel: Right, wrapping. Decisions — all prod deploys go through staging for minimum 24 hours, ADR incoming from me. P0/P1 incidents require runbook tags, ADR from me. Gateway runbook written by Arif in the next two weeks. Onboarding docs for on-call paired between Dan and Arif. Thanks everyone.
+
+[end of meeting]

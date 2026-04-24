@@ -1,0 +1,84 @@
+{
+  "action": "closed",
+  "number": 847,
+  "pull_request": {
+    "url": "https://api.github.com/repos/meridian-labs/platform/pulls/847",
+    "id": 1847392061,
+    "node_id": "PR_kwDOMeridianLabs847",
+    "html_url": "https://github.com/meridian-labs/platform/pull/847",
+    "number": 847,
+    "state": "closed",
+    "locked": false,
+    "title": "Migrate user_events writes from Postgres to MongoDB",
+    "user": {
+      "login": "jwong",
+      "id": 48291,
+      "type": "User"
+    },
+    "body": "## What\n\nThis PR migrates writes to the `user_events` table out of Postgres and onto a dedicated MongoDB collection (`identity.user_events`), using the dual-write → cutover → cleanup pattern we've used before for smaller migrations.\n\n## Why\n\nWrite amplification on `user_events` has been running at ~4x against our December capacity model for six weeks. The full benchmarks are in [this gist](https://gist.github.com/jwong/7a3b2c9f1e4d) and were discussed in the #backend-guild thread from April 8 — short version, on our actual replay shape MongoDB sustains 3.2x higher throughput on the append path and 1.6x lower p99 write latency on comparably-specced instances.\n\nWe're not hitting a wall today, but extrapolation puts us in trouble by Q3, and the cost of migrating one table now is materially lower than migrating under pressure later.\n\n## Scope\n\n- `user_events` table only. No other table moves.\n- Reads continue to hit Postgres until cutover completes.\n- The Identity graph's dependency on `user_events` is replaced with a thin repository interface that both backends satisfy, so the Activation squad's code path is unchanged.\n\n## How (migration plan)\n\n1. **Dual-write (this PR)** — writes go to both Postgres and MongoDB. Feature flag `IDENTITY_USER_EVENTS_DUAL_WRITE=true`. Shadow reads compare a sampled 1% for drift detection.\n2. **Backfill** — historical rows backfilled via the existing ETL harness, tracked in ticket IDENT-412.\n3. **Cutover** — once shadow comparison is clean for 7 days, flip reads to MongoDB. Estimated 1–2 weeks out.\n4. **Cleanup** — drop Postgres writes, archive the table, remove the feature flag. Separate PR.\n\n## Testing\n\n- Unit tests on the new repository interface (`tests/identity/test_user_events_repo.py`)\n- Integration tests against a MongoDB test container\n- Shadow-read diff harness added under `tools/diff_harness/`\n- Load-tested in staging against 2x projected peak; numbers in the gist\n\n## Rollback\n\nFlag flip. Writes resume to Postgres only, MongoDB collection retained for analysis. Full rollback in under 5 minutes.\n\n## Reviewers\n\n- @arif — identity internals\n- @dlim — ops, on-call surface\n\ncc @rshah for awareness (ingest path unchanged but worth a look)",
+    "created_at": "2026-04-16T08:12:47Z",
+    "updated_at": "2026-04-20T03:45:22Z",
+    "closed_at": "2026-04-20T03:45:22Z",
+    "merged_at": "2026-04-20T03:45:22Z",
+    "merged": true,
+    "merge_commit_sha": "a3f2c19b8e74d52a1c9e0b3f7d8a4e21c95f62b8",
+    "draft": false,
+    "head": {
+      "ref": "jwong/identity-user-events-mongo",
+      "sha": "d7e4a9c2b318f6d50a2e9c1b4f8d7a6e3c92b5f1"
+    },
+    "base": {
+      "ref": "main",
+      "sha": "8f1b3e0c7a2d5b91c4e8f0d6b3a9e2c1f7d5b8a4"
+    },
+    "labels": [
+      {"name": "identity", "color": "1d76db"},
+      {"name": "migration", "color": "b60205"},
+      {"name": "size/L", "color": "d4c5f9"}
+    ],
+    "assignees": [
+      {"login": "jwong"}
+    ],
+    "requested_reviewers": [
+      {"login": "arif"},
+      {"login": "dlim"}
+    ],
+    "milestone": {
+      "title": "Q2 Capacity",
+      "number": 14
+    },
+    "changed_files": 23,
+    "additions": 847,
+    "deletions": 216,
+    "commits": 14,
+    "review_comments": 22,
+    "comments": 6,
+    "merged_by": {
+      "login": "jwong"
+    },
+    "requested_teams": []
+  },
+  "reviews": [
+    {
+      "user": {"login": "arif"},
+      "state": "APPROVED",
+      "submitted_at": "2026-04-19T02:41:18Z",
+      "body": "Repository interface is clean. Shadow-diff harness is nice. LGTM."
+    },
+    {
+      "user": {"login": "dlim"},
+      "state": "APPROVED",
+      "submitted_at": "2026-04-19T09:18:52Z",
+      "body": "Ops review — rollback story is solid, I'm signed off on adding the Mongo collection to on-call runbooks as part of the cleanup PR. Approving conditional on that ticket being filed before cutover."
+    }
+  ],
+  "repository": {
+    "full_name": "meridian-labs/platform",
+    "default_branch": "main",
+    "private": true
+  },
+  "sender": {
+    "login": "jwong",
+    "type": "User"
+  }
+}

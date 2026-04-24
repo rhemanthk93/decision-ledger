@@ -1,0 +1,111 @@
+Meridian Labs — Q2 Planning
+Date: 2026-06-01, 10:00–11:15 SGT
+Location: Orchard meeting room + Zoom bridge
+Attendees: Priya Menon (PM, chair), Wei Ming Tan (CTO), Rahul Shah, Jessica Wong, Sarah Chen
+Transcript auto-generated and lightly cleaned.
+
+---
+
+Priya: Hi everyone, thanks for making time. Before Q2 priorities I want to spend five minutes on the Q1 retro so we're grounded. Then priorities, then anything else.
+
+Wei Ming: Go.
+
+Priya: Q1 revenue target was 1.2M ARR net new. We landed at 1.38M, so 115% of target. NRR — I pulled the number yesterday — is sitting at 118%. Churn is flat. Logo retention is high. The expansion story is mostly from Aqueduct and the two fintech accounts we onboarded in February. Q1 was good.
+
+Rahul: What's the revenue mix by segment?
+
+Priya: Roughly 70% mid-market, 25% enterprise, 5% SMB. SMB is where the noise is — Marcus keeps pushing back on the $50k ARR floor but the data says it's right. Below that we lose money on support, not even counting build cost.
+
+Sarah: Did the support cost model get revisited this quarter?
+
+Priya: Yeah, Ashraf's team did a refresh. Per-ticket cost is up 12% YoY, mostly wages. The floor should probably move to $60k next planning cycle but that's a Q3 conversation.
+
+Wei Ming: Good. Q2.
+
+Priya: I've been talking to each of you separately for two weeks and I think we have convergence on three priorities. Going to lay them out and then we debate.
+
+One — identity v2. Jessica owns. Graph compaction plus profile-merge improvements plus the TTL question Dan raised in the retro last month. This is the biggest bet, probably 40% of engineering capacity.
+
+Two — mobile SDK parity. Two of the four deals in flight are blocked by Kotlin being on an older API version. Arif owns the bump, Rahul's squad supports. Maybe 25% of capacity.
+
+Three — EU expansion prep. This is the newest priority. We need to stand up EU-region infrastructure, work through data residency, get the GDPR story coherent enough for enterprise buyers to believe us. Three deals in late-stage are asking about it, no closes yet. Maybe 25% of capacity, shared across squads.
+
+That leaves 10% for maintenance, support escalations, and the things we don't know about yet.
+
+Wei Ming: Where does the mongo migration work sit in that?
+
+Jessica: Inside identity v2. The cutover from dual-write to mongo-primary lands early Q2, cleanup and runbook work mid-Q2. Factored into the 40%.
+
+Wei Ming: Good. And the — Rahul, the Snowflake spike from Q1, did that land?
+
+Rahul: Yeah, wrote it up last week. Short version: ClickHouse beats Snowflake for our cost profile, but neither of them is Q2 work. Recommend we revisit in Q3 planning.
+
+Priya: Parking it. Sarah — anything on the process side?
+
+Sarah: Nothing to add on the priorities, I support the three. My only update — we hit a milestone on the 2-approval rule enforcement in April, median PR time-to-merge dropped from 31 hours back down to 19. The May hotfix carve-out hasn't materially changed things, fewer than 10% of PRs qualify as P0/P1. So I'd call that working.
+
+Wei Ming: Noted. Priya, on priorities — any objections to the three or to the capacity split?
+
+Rahul: On mobile SDK parity — I want to flag we're tracking to 2x event volume in Q3 per our models. The Kotlin bump is non-negotiable but we also need capacity planning work that isn't on this list.
+
+Wei Ming: Put it in the 10% maintenance bucket?
+
+Rahul: It's bigger than maintenance. Closer to a quarter-long project — we'll need sharding work or a meaningful instance upgrade if volumes come in where we think they will.
+
+Wei Ming: Okay, let's pull it into Q3 planning as a tentpole and keep Q2 focused on the three Priya laid out. If capacity becomes a fire in Q2 we re-plan.
+
+Rahul: Works. I'll do prep work in the 10% bucket so we're not starting from zero in July. Just scoping documents, no build.
+
+Priya: Great. Jessica, status check — Lumino spec, where are you?
+
+Jessica: On track. Spec is landing mid-June, probably the 15th. Covers everything in their technical requirements doc.
+
+Priya: Good. Moving on.
+
+Wei Ming: On EU prep — have we thought about what this looks like technically? Mirror deployment in eu-west-1, data replication strategy, the whole shape?
+
+Priya: That's where I'd love your squads' input actually. I have a commercial driver, not a technical plan. I need someone to own the architecture question. Can we spike it in June and land an ADR in July?
+
+Rahul: Makes sense. I'll scope the spike, probably get Arif or Dennis on it.
+
+Priya: Thank you.
+
+Wei Ming: And GDPR specifically — are we thinking processor agreements, are we thinking actual data residency, what's the depth? Because those are very different surface areas.
+
+Priya: Both, I think, but the lawyers decide. I have a call with Clifford Chance next week to get a real opinion. Not making a call today on what "GDPR story" means precisely until we have legal input.
+
+Rahul: One thing I'd want out of that call — are we on the hook to store EU customer data IN the EU, or is "EU-owned processor with appropriate safeguards" enough? Those are two completely different engineering efforts.
+
+Priya: Exactly what I'm asking them. Will report back.
+
+Wei Ming: Park it, come back next meeting with the legal view. Don't start scoping anything until that's clear.
+
+Priya: Agreed. Nothing to scope before we know the answer.
+
+Jessica: On identity v2 — I'd like to pre-flag something. The profile-merge improvements have a dependency on the mongo cutover being clean. If we're still triaging dual-write drift in July, the merge work slips. Want that risk on the record now.
+
+Priya: Noted. Jessica, can you publish the full identity v2 milestone plan by end of next week so we can see the dependencies explicitly?
+
+Jessica: Will do.
+
+Sarah: One process item — the quarterly incident review is overdue. We had four P1s in Q1 and I want to run a root-cause session. I'll propose a date in #eng-announcements this week.
+
+Priya: 👍
+
+Rahul: Hiring — do we have headcount approved for the Ingest squad this half? I have one rec open for a senior and a second I'd want to open if we get the volume work greenlit.
+
+Priya: One rec approved. Second would need to go through the next budget review.
+
+Rahul: Noted.
+
+Priya: Anything else?
+
+Jessica: Nothing from me.
+
+Wei Ming: Nothing.
+
+Priya: Okay, to recap — Q2 priorities are identity v2, mobile SDK parity, EU expansion prep. Jessica's publishing the identity v2 milestone plan. Rahul's scoping the EU architecture spike in June and doing volume prep in the 10% bucket. I'm getting legal input on GDPR this month. Sarah's running the Q1 incident review.
+
+Wei Ming: Thanks all.
+
+[end of meeting]

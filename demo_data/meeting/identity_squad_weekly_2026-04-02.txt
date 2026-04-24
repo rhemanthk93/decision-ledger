@@ -1,0 +1,77 @@
+Meridian Labs — Identity Squad Weekly
+Date: 2026-04-02, 11:00–11:40 SGT
+Location: Clarke meeting room + Zoom
+Attendees: Jessica Wong (lead), Arif Rahman, Mei Lin Chong. Daniel Lim joined at 11:22.
+Transcript auto-generated and lightly cleaned.
+
+---
+
+Jessica: Okay, standup. Arif, kick us off.
+
+Arif: Yeah, um — yesterday I finished the edge-dedup rewrite, the PR is up, I think Mei Lin reviewed it. Today I'm on the graph-compaction spike, I want to get the rough numbers before Thursday. No blockers.
+
+Mei Lin: I reviewed it, left two comments, nothing blocking.
+
+Jessica: Good. Mei Lin, you?
+
+Mei Lin: Yesterday I was on the profile-merge bug from the Zendesk ticket — the one where two profiles were colliding on a hashed email. I have a reproducer now, writing the fix today. Tomorrow probably rolling it out behind a flag. No blockers but I may need an ops hand for the backfill.
+
+Jessica: Noted, we'll grab Daniel when we're ready. Me — I spent most of yesterday looking at user_events write metrics. Which is — actually, I want to take five minutes of this standup for that. Is that okay?
+
+Arif: Go.
+
+Jessica: So. [shares screen] This is the Grafana dashboard I built last week. Top panel is writes per second on user_events, bottom panel is actual disk I/O on the primary. If you look at the ratio — see that — that's 4.1x right now. The model we used when we sized RDS back in December assumed 1.2x.
+
+Arif: That's on just one table?
+
+Jessica: Just on user_events. The rest of the Identity schema is fine. And — I want to be honest — at current traffic we're not at risk. But if you extrapolate the growth curve, we hit trouble around Q3.
+
+Mei Lin: Is the amp coming from the indexes?
+
+Jessica: Mostly, yeah. We have — let me count — six indexes on user_events because of the different lookup paths. Every insert is cascading.
+
+Mei Lin: Can we drop any?
+
+Jessica: I looked. Two of them back the identity resolution graph directly, one backs the Activation squad's hot path, the other three are audit and recovery. If we drop audit we lose the ability to reconstruct a user's event timeline for support tickets, which — Mei Lin, you just spent two days on a support ticket that needed exactly that.
+
+Mei Lin: Yep.
+
+Jessica: So dropping indexes isn't really on the table. Which leaves sharding the table inside Postgres, or — honestly — rethinking whether Postgres is the right store for this particular table.
+
+Arif: Didn't we just commit to Postgres primary two weeks ago?
+
+Jessica: Yeah. And the ADR explicitly said per-table exceptions would need a separate conversation, which is what this is. I'm not proposing we do anything yet. I'm proposing we look.
+
+[Daniel joins, 11:22]
+
+Daniel: Sorry I'm late, what'd I miss?
+
+Jessica: Identity updates are done, I was about to start on the user_events write-amp thing. Short version — we're at 4x amp on one table, extrapolation has us in trouble by Q3, I want to spike whether an append-optimized store buys us enough to be worth the complexity.
+
+Daniel: Like Mongo?
+
+Jessica: Mongo or Dynamo, I want to benchmark both on our actual workload shape before I'd have an opinion.
+
+Daniel: Operationally I'd push back hard on Mongo. We just committed to Postgres primary in ADR-0042, adding a second production store is exactly the kind of thing that doubles my on-call surface —
+
+Jessica: I know, I know. I'm not asking us to do anything. I'm asking if I can spend maybe two days running benchmarks and bringing data back. That's it. If the numbers aren't dramatic, we drop it and look at sharding instead.
+
+Daniel: Benchmarks are fine, knock yourself out. Just — no implementation work off the back of it without a new ADR.
+
+Jessica: Obviously. I'll share results next week and we can decide where it goes from there.
+
+Arif: Do you want help on the benchmark harness?
+
+Jessica: Actually yeah — if you can take the replay tooling for real user_events shapes, that'd cut my time in half.
+
+Arif: Sure. Let's sync after this.
+
+Jessica: Okay. Anyone else have anything? Mei Lin, the backfill help thing — when are you thinking?
+
+Mei Lin: Probably Thursday afternoon.
+
+Daniel: I'll be around, ping me.
+
+Jessica: Great. Let's wrap. Action items — Arif on graph compaction and helping with the replay tool, Mei Lin on the profile-merge fix with Daniel for backfill, me on the benchmarks with a report back next week. Thanks everyone.
+
+[end of meeting]

@@ -1,0 +1,113 @@
+Meridian Labs — Q1 2026 Architecture Review
+Date: 2026-03-15, 10:00–11:05 SGT
+Location: Orchard meeting room + Zoom bridge
+Attendees: Wei Ming Tan (CTO, chair), Rahul Shah (Ingest lead), Jessica Wong (Identity lead), Sarah Chen (Head of Eng), Priya Menon (PM), Daniel Lim (SRE)
+Transcript auto-generated and lightly cleaned.
+
+---
+
+Wei Ming: Okay, we're recording — thanks everyone for making time. Agenda has four things, I want to get through all of them but the big one is the datastore call. Rahul, you want to open with scale?
+
+Rahul: Yeah, um, so — pulling up the dashboard — quick numbers. We ended Q1 at about 1.4 billion events ingested, which is — let me check — about 40% up quarter over quarter. Peak rate is sitting around 22k events per second now, sustained, during US business hours.
+
+Wei Ming: And the projection?
+
+Rahul: Projection for end of Q2 is we're looking at roughly 35k peak, maybe 40 if the two enterprise pilots in onboarding convert. The ceiling on the current Postgres setup — Daniel, what was the number we landed on last week?
+
+Daniel: Uh, for a single-writer config, our napkin ceiling is around 80 to 100k sustained writes per second with the current schema, assuming we keep batch inserts and the write-ahead log tuned. We're well under that.
+
+Rahul: Right. So the point I want to make is, we don't have a fire right now. Which is why I don't want us to panic-switch stores just because the graph is going up and to the right.
+
+Jessica: Can I jump in?
+
+Rahul: Go.
+
+Jessica: So — and I want to be careful here because I don't want this to become a datastore war — but on user_events specifically, the write amplification is already biting us. We're seeing, um, 4x amplification on the ingest path because of how the indexes compound. It's — I can share the Grafana panel in the chat — [pause] — there.
+
+Wei Ming: That's the table your squad owns, right?
+
+Jessica: Yeah, Identity owns it, it backs the resolution graph lookups. So the 4x is on that one table. The rest of the schema is fine, honestly.
+
+Rahul: But you're saying fine now, or fine at 40k?
+
+Jessica: Fine now. At 40k I'd be nervous about that one table specifically.
+
+Wei Ming: Okay. I hear that. But I want to separate two things — one is what's the primary datastore strategy for the next 18 months. Two is do we have any specific tables that need special handling. Those are different conversations.
+
+Rahul: Agreed.
+
+Wei Ming: For one, I want to commit. We've been drifting on this for two quarters and every time someone joins they ask what our DB strategy is and we don't have a clean answer. My read is Postgres 15 on RDS, ap-southeast-1, stays primary. Read replicas for analytics. We know how to operate it, we've had zero unplanned Postgres incidents in the last year, and the 18-month runway on capacity is fine. I'd like to sign that as an ADR this afternoon.
+
+Daniel: I'm in favor, on ops grounds alone. Adding a second production datastore doubles on-call surface.
+
+Rahul: Agreed from Ingest.
+
+Jessica: I'm — yeah, okay, for primary, fine. I'm still going to want a conversation about user_events separately at some point.
+
+Wei Ming: That's fair. The ADR is about primary. If a specific table needs a different store later, that's a separate decision, separately documented. But the default is Postgres. Anyone against?
+
+[silence]
+
+Wei Ming: Okay, done. I'll write it up this afternoon, link it in #eng-announcements. Next item.
+
+Sarah: That's me. Um, so — review burden. I've been tracking this for a couple of sprints. The median PR time-to-merge is creeping up, it was 18 hours end of Q4, it's now 31. And when I dug in, the bottleneck is reviewer availability, not PR quality. We have a de facto policy that basically anything can merge with one approval, and what's happening is authors are pinging one person they know is online and merging fast.
+
+Wei Ming: What's the counterfactual policy?
+
+Sarah: I'd like to make it explicit — two approvals required on every PR before merge, no exceptions. It's what most places our size do. It'll slow things down a bit in the short term but I think it's the right floor.
+
+Rahul: Every PR, including trivial stuff like dependency bumps?
+
+Sarah: Every PR.
+
+Daniel: And urgent fixes? Like if prod is on fire?
+
+Sarah: If prod is on fire we're paging, and you can get a second approval in five minutes. I don't want a hotfix carve-out because carve-outs are how policies decay.
+
+Wei Ming: I like it. Two approvals, every PR. Agreed?
+
+Rahul: Yep.
+
+Jessica: Yeah.
+
+Priya: Not my surface but sure.
+
+Wei Ming: Done. Sarah, you'll announce?
+
+Sarah: I'll post in #eng-announcements after yours.
+
+Wei Ming: Priya, you had the custom integration item.
+
+Priya: Yeah. Um — so sales are pushing really hard to build one-off integrations for smaller customers. We had three asks this quarter alone, and Marcus has basically been promising things. I want us to set a policy because otherwise we're going to spend engineering capacity on $8k-a-year customers.
+
+Wei Ming: What's the number?
+
+Priya: I've been thinking $50k ARR as the threshold. Below that you get standard connectors only, no custom builds. Above that it's a case-by-case conversation with the activation squad.
+
+Rahul: Fifty feels right to me. Below that the LTV doesn't cover the maintenance, let alone the build.
+
+Jessica: I'd — actually — fine, yeah, fifty's fine.
+
+Priya: And to be clear, this is a product decision, not just a capacity decision. We're positioning as a platform, not a services shop.
+
+Wei Ming: Agreed. No custom integrations for customers under 50k ARR. Priya, can you land that with sales this week?
+
+Priya: Will do.
+
+Wei Ming: Last item was the — um — the Snowflake question from last week. I don't want to make a call today, I want to spike that separately. Can I put that in Rahul's court for Q2?
+
+Rahul: Sure, I'll scope it.
+
+Wei Ming: And the SDK priority thing — Android-first or iOS-first — we didn't resolve that last meeting and I don't think we have new data. Let's defer to the next one.
+
+Jessica: Works.
+
+Rahul: One more thing while I have the floor — cold storage for events older than 90 days. I want to take a look at that this week. Not promising anything yet, just putting it on my list.
+
+Wei Ming: Sounds good. Anything else?
+
+[silence]
+
+Wei Ming: Okay, wrapping. Actions — ADR for Postgres primary from me today, 2-approval policy announcement from Sarah, 50k policy from Priya to sales this week, Snowflake spike by Rahul for Q2, cold-storage exploration by Rahul this week. Thanks all.
+
+[end of meeting]
