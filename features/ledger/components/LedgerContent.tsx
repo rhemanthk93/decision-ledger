@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useDeferredValue, useMemo, useRef } f
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Plus, Search, ChevronDown, ChevronUp,
-  FileText, LayoutList, Clock, Loader2, Sparkles, RotateCcw, Copy, Check, CheckCircle2, X,
+  FileText, LayoutList, Clock, Loader2, Sparkles, RotateCcw, Copy, Check, CheckCircle2, X, Zap,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -15,6 +15,7 @@ import DecisionTimeline from './DecisionTimeline'
 import QueryBar from './QueryBar'
 import ConflictCards from './ConflictCards'
 import DocumentUpload from '@/features/ingest/components/DocumentUpload'
+import PipelineRunner from '@/features/pipeline/components/PipelineRunner'
 import type { Decision, Conflict, DecisionStatus, DLDocument } from '@/lib/types'
 import {
   getDecisions,
@@ -80,6 +81,7 @@ export default function LedgerContent() {
   const [showUpload, setShowUpload]     = useState(false)
   const [seeded, setSeeded]             = useState(false)
   const [copied, setCopied]             = useState(false)
+  const [showPipeline, setShowPipeline] = useState(false)
 
   const inlineNarrationAbort = useRef<AbortController | null>(null)
   const highlightRef = useRef<HTMLDivElement | null>(null)
@@ -630,6 +632,13 @@ export default function LedgerContent() {
                 }
               </button>
             )}
+            <button
+              onClick={() => setShowPipeline(v => !v)}
+              className="flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            >
+              <Zap className="h-3 w-3" />
+              Pipeline
+            </button>
             <Button
               onClick={() => setShowUpload(v => !v)}
               className="gap-2 bg-orange-600 hover:bg-orange-700 h-8 px-3 text-xs"
@@ -639,6 +648,21 @@ export default function LedgerContent() {
             </Button>
           </div>
         </motion.div>
+
+        {/* Pipeline panel */}
+        <AnimatePresence>
+          {showPipeline && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.2 }}
+              className="overflow-hidden mb-6"
+            >
+              <PipelineRunner onComplete={load} />
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Upload panel */}
         <AnimatePresence>
