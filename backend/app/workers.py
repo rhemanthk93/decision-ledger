@@ -16,7 +16,8 @@ import logging
 from typing import Any
 
 from app.agents.extractor import extract
-from app.config import EXTRACTOR_WORKERS
+from app.agents.resolver import resolve
+from app.config import EXTRACTOR_WORKERS, RESOLVER_INTERVAL_SEC
 from app.db import get_supabase
 from app.queue import raw_docs
 from app.schemas import Decision, Document
@@ -24,6 +25,7 @@ from app.schemas import Decision, Document
 log = logging.getLogger(__name__)
 
 _worker_tasks: list[asyncio.Task[None]] = []
+_resolver_task: asyncio.Task[None] | None = None
 
 
 # ============================================================
@@ -125,28 +127,72 @@ async def _consumer_loop(worker_id: int) -> None:
 
 
 # ============================================================
+# Resolver interval worker
+# ============================================================
+
+async def run_resolver_interval() -> None:
+    """Fires resolve() every RESOLVER_INTERVAL_SEC. One failed cycle must
+    not kill the loop. Phase 4 will add a detector call right after each
+    successful resolve (see DETECTOR-HOOK below)."""
+    log.info("resolver interval worker started (every %ds)", RESOLVER_INTERVAL_SEC)
+    try:
+        while True:
+            try:
+                await resolve()
+                # DETECTOR-HOOK: Phase 4 wires the conflict detector here
+                # (runs on the same batch that resolve just produced).
+                #
+                # Phase 4 precondition: detector rule functions must
+                # require d1.topic_keywords and d2.topic_keywords to
+                # share at least one token (lightly normalized — e.g.
+                # singular/plural) before classifying any conflict other
+                # than `consistent`. This prevents false positives on
+                # the mixed clusters that exist because CLUSTERING_THRESHOLD
+                # is tuned for drift-recall over isolation (see config.py).
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # noqa: BLE001
+                log.exception("resolver cycle failed: %s", e)
+            await asyncio.sleep(RESOLVER_INTERVAL_SEC)
+    except asyncio.CancelledError:
+        log.info("resolver interval worker cancelled")
+        raise
+
+
+# ============================================================
 # Lifecycle (called from FastAPI lifespan)
 # ============================================================
 
 def start_workers() -> None:
-    global _worker_tasks
-    if _worker_tasks:
-        log.warning("extractor workers already running (n=%d)", len(_worker_tasks))
-        return
+    global _worker_tasks, _resolver_task
     loop = asyncio.get_event_loop()
-    _worker_tasks = [
-        loop.create_task(_consumer_loop(i + 1), name=f"extractor-{i+1}")
-        for i in range(EXTRACTOR_WORKERS)
-    ]
-    log.info("started %d extractor worker(s)", EXTRACTOR_WORKERS)
+    if not _worker_tasks:
+        _worker_tasks = [
+            loop.create_task(_consumer_loop(i + 1), name=f"extractor-{i+1}")
+            for i in range(EXTRACTOR_WORKERS)
+        ]
+        log.info("started %d extractor worker(s)", EXTRACTOR_WORKERS)
+    else:
+        log.warning("extractor workers already running (n=%d)", len(_worker_tasks))
+
+    if _resolver_task is None:
+        _resolver_task = loop.create_task(run_resolver_interval(), name="resolver-interval")
+    else:
+        log.warning("resolver interval worker already running")
 
 
 async def stop_workers() -> None:
-    global _worker_tasks
-    if not _worker_tasks:
+    global _worker_tasks, _resolver_task
+    tasks: list[asyncio.Task[None]] = []
+    if _worker_tasks:
+        tasks.extend(_worker_tasks)
+    if _resolver_task is not None:
+        tasks.append(_resolver_task)
+    if not tasks:
         return
-    for t in _worker_tasks:
+    for t in tasks:
         t.cancel()
-    await asyncio.gather(*_worker_tasks, return_exceptions=True)
+    await asyncio.gather(*tasks, return_exceptions=True)
     _worker_tasks = []
-    log.info("stopped extractor workers")
+    _resolver_task = None
+    log.info("stopped all workers")

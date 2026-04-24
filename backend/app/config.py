@@ -15,7 +15,17 @@ GEMINI_EMBED_MODEL = "gemini-embedding-001"
 EMBED_DIM = 768                              # MRL-truncated from 3072; same MTEB tier
 
 # ---- Clustering ----
-CLUSTERING_THRESHOLD = 0.82                  # cosine; tune via scripts/tune_threshold.py
+# Empirically tuned on the 26-decision corpus after reshaping
+# embed_input_for() to lead with keywords, with deterministic decision
+# ordering (ORDER BY decided_at, id ASC — see _fetch_unclustered in
+# resolver.py). At 0.76: 8 clusters, all three critical drift clusters
+# form correctly — postgres+mongodb (Drift #1), review-policy trio
+# (2-approval + P0/P1 hotfix + CVE hotfix), $50k+ghost+lumino-policy
+# (Drift #3) — and deploy_policy isolates. event_schema and
+# identity_ttl absorb into mixed clusters. Phase 4's detector adds a
+# keyword-overlap precondition to conflict rules to prevent
+# false-positive conflicts on those mixed clusters.
+CLUSTERING_THRESHOLD = 0.76                  # cosine; tune via scripts/tune_threshold.py
 
 # ---- Decision filtering ----
 CONFIDENCE_FILTER = 0.60                     # below this is soft; hidden from main timeline
