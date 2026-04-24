@@ -15,6 +15,7 @@ import asyncio
 import logging
 from typing import Any
 
+from app.agents.detector import detect_all
 from app.agents.extractor import extract
 from app.agents.resolver import resolve
 from app.config import EXTRACTOR_WORKERS, RESOLVER_INTERVAL_SEC
@@ -131,28 +132,26 @@ async def _consumer_loop(worker_id: int) -> None:
 # ============================================================
 
 async def run_resolver_interval() -> None:
-    """Fires resolve() every RESOLVER_INTERVAL_SEC. One failed cycle must
-    not kill the loop. Phase 4 will add a detector call right after each
-    successful resolve (see DETECTOR-HOOK below)."""
+    """Fires resolve() then detect_all() every RESOLVER_INTERVAL_SEC.
+    One failed cycle in either step must not kill the loop."""
     log.info("resolver interval worker started (every %ds)", RESOLVER_INTERVAL_SEC)
     try:
         while True:
             try:
                 await resolve()
-                # DETECTOR-HOOK: Phase 4 wires the conflict detector here
-                # (runs on the same batch that resolve just produced).
-                #
-                # Phase 4 precondition: detector rule functions must
-                # require d1.topic_keywords and d2.topic_keywords to
-                # share at least one token (lightly normalized — e.g.
-                # singular/plural) before classifying any conflict other
-                # than `consistent`. This prevents false positives on
-                # the mixed clusters that exist because CLUSTERING_THRESHOLD
-                # is tuned for drift-recall over isolation (see config.py).
             except asyncio.CancelledError:
                 raise
             except Exception as e:  # noqa: BLE001
                 log.exception("resolver cycle failed: %s", e)
+            # Detector runs on the same batch the resolver just produced.
+            # Wrapped separately so a detector failure doesn't skip the
+            # sleep or prevent the next resolver cycle.
+            try:
+                await detect_all()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # noqa: BLE001
+                log.exception("detector cycle failed: %s", e)
             await asyncio.sleep(RESOLVER_INTERVAL_SEC)
     except asyncio.CancelledError:
         log.info("resolver interval worker cancelled")
