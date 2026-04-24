@@ -89,6 +89,33 @@ async def test_doc_14_returns_zero_decisions():
 
 
 @pytest.mark.integration
+async def test_doc_08_returns_one_soft_ghost_reference():
+    """May 20 sales_sync — Marcus references 'the custom segment pipe we agreed to
+    for lumino', Priya confirms 'yep that's on track', Jessica agrees spec is coming.
+    This is the Drift #3 ghost-decision trigger. Must extract exactly 1 soft
+    decision pointing at the Lumino custom work."""
+    doc = await _doc_by_num(8)
+    assert "sales_sync" in doc.filename
+
+    decisions = await extract(doc)
+    assert len(decisions) == 1, (
+        f"expected exactly 1 soft ghost reference, got {len(decisions)}: "
+        f"{_statements(decisions)}"
+    )
+    d = decisions[0]
+    assert 0.40 <= d.confidence <= 0.55, (
+        f"expected confidence in [0.40, 0.55], got {d.confidence:.3f}"
+    )
+    stmt_low = d.statement.lower()
+    assert "lumino" in stmt_low or "custom" in stmt_low, (
+        f"expected statement to mention 'lumino' or 'custom' integration; got: {d.statement}"
+    )
+    assert "agreed to" in d.source_excerpt.lower() or "agreed" in d.source_excerpt.lower(), (
+        f"expected source_excerpt to contain the retrospective phrase; got: {d.source_excerpt!r}"
+    )
+
+
+@pytest.mark.integration
 async def test_doc_03_returns_one_soft_decision():
     """Apr 2 identity squad weekly — foreshadows Drift #1 as a soft decision. §9.2 target: 0 firm, 1 soft."""
     doc = await _doc_by_num(3)

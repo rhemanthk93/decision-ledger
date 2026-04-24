@@ -125,7 +125,8 @@ For every potential decision you find, run both checks. If either fails, skip it
 
   Check A — Was the commitment MADE here, or just MENTIONED?
     "The group agreed today to use Postgres" → MADE here → can extract.
-    "As per our Postgres decision from last quarter..." → MENTIONED; the commitment was made elsewhere → skip.
+    "As per ADR-0042, Postgres is primary." → MENTIONED via a formal artifact citation → skip; the decision already exists on record.
+    EXCEPTION: "the custom pipe we agreed to for Lumino" with NO formal artifact cited and a second speaker confirming → this is a RETROSPECTIVE REFERENCE (see dedicated section below) and IS extracted as a soft decision. This is the one case where "mentioned" still counts.
 
   Check B — Is the subject of the commitment ITSELF decided, or is it hypothetical?
     "We will ship with 2-approval policy." → subject ("2-approval policy") is decided → can extract.
@@ -207,6 +208,73 @@ Score confidence between 0 and 1 based on how explicit the commitment is:
 Confidence is a float between 0 and 1. Never return 92 or 0.92%% — always a plain fraction like 0.92.
 
 ========================================================================
+TWO SOFT-DECISION PATTERNS TO CAPTURE
+========================================================================
+
+There are TWO specific soft-decision patterns you must actively look for. Both live in documents that otherwise look like "discussion venues" — do not skip them on venue-gate grounds. Extract each as one decision at confidence 0.40-0.55.
+
+========================================================================
+PATTERN 1 — EXPLORATORY DIRECTIONS (soft)
+========================================================================
+
+A team visibly agrees in-document that a DIRECTION is being explored, without committing to any specific choice. The exploration is soft-committed; the specific outcome is still open. This is the first ledger trace that a team is actively moving away from the status quo.
+
+Signature (ALL must hold):
+  • In-document discussion where multiple named participants acknowledge a problem and that a change is being evaluated.
+  • A clear future-facing statement of intent by the owning team — "we're looking at X as an alternative", "the squad is exploring X".
+  • Clear agreement that the investigation is happening — not just one person volunteering.
+  • NO commitment to a specific technology, vendor, or design yet.
+  • NO disclaimer elsewhere in the document. If anyone says "not proposing anything yet", "just putting data in front of people", "we're not committing to anything", or "for when the conversation does happen" — Pattern 1 does NOT apply. The disclaimer means the team is NOT yet committed to the exploration direction; this is data-sharing, not a soft decision. Return zero decisions from that document (subject to Pattern 2 still applying if the retrospective-reference pattern is also present).
+  • Conditional/hypothetical framing ("if we ever did X, we'd need Y") does NOT satisfy this pattern. Those are skipped under the "Agreements to hypotheticals" rule.
+
+Example (EXTRACT as one soft decision, confidence 0.45-0.55):
+  jwong: "we've got a write-amp problem on user_events. i want to look at append-optimized stores as an alternative."
+  dlim: "+1, the current path isn't sustainable past Q3."
+  jwong: "I'll run benchmarks on Mongo and Dynamo next sprint."
+  → EXTRACT one decision:
+     statement: "The identity squad is exploring alternative append-optimized datastores for the user_events table."
+     type: architectural
+     confidence: 0.50
+     source_excerpt: the "write-amp" + "alternative" exchange, verbatim
+     decided_by: the agreeing participants
+
+What to skip within the same exploration:
+  • "jwong will benchmark Mongo and Dynamo" is an action item/spike → skip.
+  • Specific store names mentioned as candidates ("let's try Mongo") are not a commitment to Mongo → skip.
+
+The single decision captures the DIRECTION, not the investigation tasks.
+
+========================================================================
+PATTERN 2 — RETROSPECTIVE REFERENCES (soft, aka "ghost" references)
+========================================================================
+
+A casual, past-tense mention of an agreement that was allegedly made elsewhere, treated as established fact within the document, and confirmed by a second speaker — but with NO formal artifact cited (no ADR number, no PR number, no specific dated document or named meeting). This pattern is the first and sometimes ONLY trace of a decision in the ledger, so it must be recorded — as a soft decision.
+
+Signature (ALL of these must hold for the pattern to trigger):
+  • PAST TENSE + definite article: "the X we agreed to", "per the approach we landed on for X", "the X we committed to", "as decided for X".
+  • NO formal artifact cited. Not "per ADR-0042", not "per PR #847", not "per the March 15 arch review". Just a bare reference to an agreement having happened.
+  • A second, separate speaker confirms without pushback — "yep", "on track", "on it", "spec coming next week" — or acts on the reference as if it were established.
+  • No dissent or challenge in the thread.
+
+When all four hold, emit ONE soft decision per referenced agreement:
+  • type: whichever best fits the referenced work (usually architectural or product).
+  • confidence: 0.40-0.55.
+  • statement: paraphrase WHAT WAS ALLEGEDLY AGREED, in positive form. Do NOT write "the team referenced an agreement" or "it was mentioned that". Treat the referenced decision as the subject — e.g. "A custom Segment-compatible integration pipe will be built for the Lumino account."
+  • source_excerpt: include the "we agreed to" / "per the approach" / retrospective phrase verbatim. This is how downstream agents trace the ghost reference.
+  • decided_by: the speakers who reference and confirm the agreement in THIS document.
+
+Distinguishing Pattern 2 from Pattern 1 and from non-decisions:
+  • vs. Pattern 1 (exploratory) — exploratory is about an investigation happening NOW, looking forward. Retrospective references report a decision that was allegedly completed in the PAST. They can co-exist in the same doc; extract both.
+  • vs. "If we ever migrate to Mongo" (hypothetical) — hypotheticals are FUTURE TENSE + conditional. Retrospective references are PAST TENSE + definite. Skip hypotheticals; extract retrospectives.
+  • vs. a PR body citing ADR-0042 (reiteration) — a citation of a specific formal artifact is a reiteration; skip. A bare "we agreed to X" with no artifact is a retrospective reference; extract.
+  • vs. a standup line ("yesterday I shipped X") — status updates use first person + specific completed work. Retrospective references invoke a group agreement. Skip the standup line; extract the retrospective.
+
+Do NOT trigger Pattern 2 on:
+  • A single speaker's past-tense claim with no second-speaker confirmation.
+  • A discussion that reaches agreement in-thread (that is a fresh slack soft-decision, 0.45-0.60 under the existing calibration).
+  • A future-tense "we'll agree to" — that has not happened yet.
+
+========================================================================
 REQUIRED FIELDS (per decision)
 ========================================================================
 
@@ -232,7 +300,7 @@ These are drawn from real fixtures in this corpus. Each one is something that LO
 
   4. Spec: a section titled "Open questions" or "Unresolved" with bullets like "Do we support custom webhooks?" → SKIP every bullet. These are explicitly marked as unresolved.
 
-  5. PR body citing ADR-0042: "This PR implements the Postgres-as-primary-datastore decision from ADR-0042." → The merge itself IS a decision (type=action). The citation of ADR-0042 is NOT a separate new decision about ADR-0042.
+  5. PR body citing ADR-0042: "This PR implements the Postgres-as-primary-datastore decision from ADR-0042." → The merge itself IS a decision (type=action). The citation of ADR-0042 is NOT a separate new decision about ADR-0042 — the decision already exists on record as ADR-0042. (Contrast: a Slack thread saying "the pipe we agreed to for Lumino" with NO artifact cited is a RETROSPECTIVE REFERENCE — see dedicated section below — and IS extracted as a soft decision.)
 
   6. Slack or meeting: "Jessica will run benchmarks on Mongo and Dynamo this sprint." → SKIP. An investigation/spike commitment is an action item, not a decision. Jessica committed to producing data, not to a policy.
 
