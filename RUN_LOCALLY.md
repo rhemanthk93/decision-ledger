@@ -21,16 +21,22 @@ pnpm install            # if you don't have pnpm: `corepack enable` first,
                         # or `COREPACK_INTEGRITY_KEYS=0 pnpm install` on newer Node
 
 # 3. Frontend env — create .env.local at the repo root
-cat > .env.local <<EOF
+cat > .env.local <<'EOF'
 NEXT_PUBLIC_SUPABASE_URL=https://alrjqiehegqwxpejxups.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon key — safe to commit>
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon key, safe to commit>
 NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
+
+# Server-side - used by the Next.js /api/query route (Ask Claude button).
+# Same value as backend/.env's ANTHROPIC_API_KEY.
+ANTHROPIC_API_KEY=sk-ant-api03-...
 EOF
 ```
 
 Notes:
 - The **service-role key** is backend-only; never put it in `.env.local` (it bypasses RLS).
 - The **anon key** is the one that starts with `sb_publishable_...` or the legacy `eyJhbG...` JWT marked `anon` in the Supabase dashboard.
+- The **ANTHROPIC_API_KEY** is needed by the Next.js `/api/query` route (the chat/"Ask Claude" UI). Copy it from `backend/.env`. Without it, the chat silently returns empty responses.
+- IMPORTANT: keep `.env.local` ASCII-only. Next.js's dotenv parser silently drops everything after a line containing an em dash (`—`, U+2014) or other non-ASCII characters, so do not paste fancy-quoted comments into this file.
 - Database state is already seeded: 14 documents, 26 decisions (all clustered), 8 topic_clusters (all labeled), 6 conflicts (all narrated). You do not need to rerun the pipeline to see data.
 
 ## Daily run
@@ -126,4 +132,5 @@ uv run python scripts/label_remaining_clusters.py
 - **CORS error on `/admin/run-pipeline`.** Backend allows `http://localhost:3000` only. If you're on a different port, edit `backend/app/main.py` → `allow_origins`.
 - **Backend says `ModuleNotFoundError: No module named 'app'`.** Run from `backend/`, not the repo root.
 - **pnpm says "Cannot find matching keyid" via corepack.** Prefix with `COREPACK_INTEGRITY_KEYS=0`.
-- **Page loads but tables are empty.** Check `curl http://localhost:8000/admin/status` — if `documents=0`, the DB was truncated. Re-seed per above.
+- **Page loads but tables are empty.** Check `curl http://localhost:8000/admin/status`. If `documents=0`, the DB was truncated. Re-seed per above.
+- **"Ask Claude" button does nothing / returns empty.** The Next.js `/api/query` route calls Anthropic directly and needs `ANTHROPIC_API_KEY` in `.env.local` (server-side only, no `NEXT_PUBLIC_` prefix). Also: if you have non-ASCII characters in `.env.local` (em dashes, curly quotes, etc.), Next.js's dotenv parser drops every line after the offending character. Keep the file ASCII-only.
