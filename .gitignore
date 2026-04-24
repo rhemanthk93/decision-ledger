@@ -46,6 +46,17 @@ next-env.d.ts
 # JetBrains IDEs
 .idea/
 
+# Playwright MCP session artifacts
+.playwright-mcp/
+
+# Ad-hoc screenshots captured for submissions etc.
+/01-*.png
+/02-*.png
+/03-*.png
+/04-*.png
+/05-*.png
+/06-*.png
+
 # ---- Python (backend) ----
 __pycache__/
 *.py[cod]
