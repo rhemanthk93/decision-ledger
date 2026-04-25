@@ -227,12 +227,6 @@ First-load of `/ledger` renders the full demo without re-running the pipeline.
 
 ---
 
-## Branches
-
-- **`main`** — teammate's initial frontend POC (localStorage-backed, pre-integration).
-- **`hemanth`** — backend-only, phases 0-5 of the build plan.
-- **`integration`** — backend + frontend wired together via Supabase + Realtime + the `/admin/run-pipeline` bridge. **This is the runnable branch.**
-
 ---
 
 ## Credit
